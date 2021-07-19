@@ -10,6 +10,7 @@ define( 'DATADIR', dirname(__FILE__) . '/posts');
 define( 'VIEWSDIR', dirname(__FILE__) . '/views');
 define( 'BASEURL', 'http://localhost/tinyblog' );
 define( 'BASEURLPATH', '/tinyblog/');
+define( 'LOGFILE', dirname(__FILE__) . '/error.log');
 
 if(!function_exists('str_starts_with')) {
 	function str_starts_with($needle, $haystack) {
@@ -64,7 +65,7 @@ class TinyBlog {
 				}
 			}
 
-			echo $this->renderView('index', ['posts' => $posts, 'page' => $page, 'blog' => $this]);
+			$this->renderView('index', ['posts' => $posts, 'page' => $page, 'blog' => $this]);
 		}
 	}
 
@@ -74,11 +75,17 @@ class TinyBlog {
 		if($post != null) {
 			//We will be converting the markdown file to HTML and displaying in a view
 			$path = DATADIR . "/" . trim($post) . ".md";
-			echo $this->parseMarkdown(file_get_contents($path));
+			$content = $this->parseMarkdown(file_get_contents($path));
+			$this->renderView('posts', ['post' => $content, 'blog' => $this]);
 		}
 		else {
-			echo "<h1>404 Page Not Found :(</h1>";
-			echo "<p>The page or post you are looking for does not exist";
+			if($this->viewExists('404')) {
+				$this->renderView('404', ['name' => $name]);
+			}
+			else {
+				echo "<h1>404 Page Not Found :(</h1>";
+				echo "<p>The page or post you are looking for does not exist";
+			}
 		}
 	}
 
@@ -97,6 +104,7 @@ class TinyBlog {
 	}
 
 	public function run() {
+		$this->logMessage("Info: App startup");
 		$this->getFileList();
 
 		$uri = $this->getRouteableUri();
@@ -105,6 +113,7 @@ class TinyBlog {
 		if(array_key_exists($route['action'], $this->actions)) {
 			call_user_func_array([$this, $this->actions[$route['action']]], $route['args']);
 		}
+		$this->logMessage("Info: App shutdown");
 	}
 
 	protected function getRouteableUri() {
@@ -124,6 +133,7 @@ class TinyBlog {
 
 	protected function parseUri($uri) {
 		if(strlen($uri) == 0) {
+			$this->logMessage("Warn: Empty URI string given in parseUri");
 			return ['action' => 'index', 'args' => []];
 		}
 		else {
@@ -146,6 +156,7 @@ class TinyBlog {
 	protected function getFileList() {
 		if(file_exists("posts.cache") && (time() - filemtime("posts.cache")) < 86400) {
 			$this->posts = file("posts.cache");
+			$this->logMessage("Info: Posts cache file found, loading files from cache");
 		}
 		else {
 			$files = scandir(DATADIR);
@@ -163,7 +174,7 @@ class TinyBlog {
 			}
 
 			if(file_exists("posts.cache")) { unlink("posts.cache"); }
-			file_put_contents("posts.cache", implode("\n", $this->posts));
+				file_put_contents("posts.cache", implode("\n", $this->posts));
 		}
 	}
 
@@ -182,11 +193,13 @@ class TinyBlog {
 
 		if(file_exists($path))
 			return file_get_contents($path);
+		else
+			$this->logMessage("Error: No post file found for {$name} ($path)");
 		return null;
 	}
 
 	protected function renderView($viewName, $data) {
-		$view = VIEWSDIR . "/{$viewName}" . ".php";
+		$view = VIEWSDIR . "/{$viewName}.php";
 
 		if(file_exists($view)) {
 			ob_start();
@@ -197,9 +210,22 @@ class TinyBlog {
 
 			$content = ob_get_contents();
 			ob_end_clean();
-			return $content;
+			echo $content;
 		}
-		return "<h1>Error 404. :(</h1> <p>Sorry the page you were looking for couldn't be found</p>";
+		else {
+			$this->logMessage("Error: No view {$viewName} exists ({$view})");
+		}
+	}
+
+	protected function viewExists($viewName) {
+		$view = VIEWSDIR . "/{$viewName}.php";
+		return file_exists($view);
+	}
+
+	protected function logMessage($message) {
+		$fp = fopen(LOGFILE, "a");
+		fwrite($fp, "[" . date("j M, Y h:i:sA") . "]" . $message . "\n");
+		fclose($fp);
 	}
 
 	protected function parseMarkdown($content) {
